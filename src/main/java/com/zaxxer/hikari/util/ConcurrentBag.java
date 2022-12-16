@@ -56,18 +56,35 @@ import static java.util.concurrent.locks.LockSupport.parkNanos;
  *
  * @param <T> the templated type to store in the bag
  */
+
+/**
+ * 存储连接的封装对象PoolEntry，另外做了并发控制来解决连接池的并发问题。
+ * @param <T>
+ */
 public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseable
 {
    private static final Logger LOGGER = LoggerFactory.getLogger(ConcurrentBag.class);
 
+   /**
+    * 可以理解为ConcurrentBag缓存的连接池, 存放着状态为未使用、使用中和保留中三种状态的PoolEntry对象.
+    *  pool 创建连接时添加.
+    */
    private final CopyOnWriteArrayList<T> sharedList;
+   /** 是否使用弱引用 */
    private final boolean weakThreadLocals;
 
+   /**
+    * 存放当前线程的PoolEntry对象,如果当前线程再次借用则优先会从该列表中获取,但是也可能会被其他线程借走.
+    * ProxyConnection.close() -> concurrentBag.requite() 中添加.
+    */
    private final ThreadLocal<List<Object>> threadList;
    private final IBagStateListener listener;
+   /** 当前等待的线程数 */
    private final AtomicInteger waiters;
+   /** 是否关闭标识 */
    private volatile boolean closed;
 
+   /** 无容量阻塞队列,插入操作需要等待删除操作,删除操作无需等待插入操作 */
    private final SynchronousQueue<T> handoffQueue;
 
    public interface IConcurrentBagEntry
@@ -117,8 +134,22 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
     * @return a borrowed instance from the bag or null if a timeout occurs
     * @throws InterruptedException if interrupted while waiting
     */
+   /**
+    * 从ThreadLocal中获取: 每个线程从ConcurrentBag中借出连接时都会创建一个ThreadLocal对象, 当客户端将连接归还给ConcurrentBag时，首先判断当前是否有其他客户端等待连接，
+    * 如果有其他客户端等待那么就将连接给其他客户端，如果没有客户端等待那么将连接存入ThreadLocal中，每个ThreadLocal最多会存储50个连接.
+    *
+    * 从sharedList中获取: 在ConcurrentBag初始化的，会初始化指定数量的PoolEntry对象存入sharedList.
+    *
+    * 通过IBagStateListener创建新的元素: HikariPool实现了listener的addBagItem方法.
+    *
+    * @param timeout
+    * @param timeUnit
+    * @return
+    * @throws InterruptedException
+    */
    public T borrow(long timeout, final TimeUnit timeUnit) throws InterruptedException
    {
+      /** 1.从ThreadLocal中获取当前线程绑定的对象集合  */
       // Try the thread-local list first
       final var list = threadList.get();
       for (int i = list.size() - 1; i >= 0; i--) {
@@ -130,11 +161,14 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
          }
       }
 
+      /** 2.当前等待对象数量自增1 */
       // Otherwise, scan the shared list ... then poll the handoff queue
       final int waiting = waiters.incrementAndGet();
       try {
+         /** 3.遍历当前缓存的sharedList, 如果当前状态为未使用,则通过CAS修改为已使用*/
          for (T bagEntry : sharedList) {
             if (bagEntry.compareAndSet(STATE_NOT_IN_USE, STATE_IN_USE)) {
+               /** 如果当前等待线程不止1个,则给监听中添加一个任务 */
                // If we may have stolen another waiter's connection, request another bag add.
                if (waiting > 1) {
                   listener.addBagItem(waiting - 1);
@@ -143,12 +177,15 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
             }
          }
 
+         /** 4.如果当前缓存的sharedList为空或者都在使用中,那么给listener添加一个任务*/
          listener.addBagItem(waiting);
 
          timeout = timeUnit.toNanos(timeout);
          do {
             final var start = currentTime();
+            /** 5.从阻塞队列中等待超时获取元素. listener.addBagItem()时添加. */
             final T bagEntry = handoffQueue.poll(timeout, NANOSECONDS);
+            /** 6.如果获取元素失败或者获取元素且使用成功则均返回 */
             if (bagEntry == null || bagEntry.compareAndSet(STATE_NOT_IN_USE, STATE_IN_USE)) {
                return bagEntry;
             }
@@ -176,6 +213,11 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
    {
       bagEntry.setState(STATE_NOT_IN_USE);
 
+      /**
+       *  如果当前存在等待线程,则优先将元素给等待线程
+       *  waiters.get()是实时获取的，有可能长时间一直大于0，这样代码就会变成死循环，浪费CPU。
+       *  代码会尝试不同层次的睡眠，一个是每隔255个waiter睡10ns，一个是使用yield让出cpu时间片。
+       */
       for (var i = 0; waiters.get() > 0; i++) {
          if (bagEntry.getState() != STATE_NOT_IN_USE || handoffQueue.offer(bagEntry)) {
             return;
@@ -188,6 +230,7 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
          }
       }
 
+      /** 如果当前没有线程使用连接,则添加到当前线程的ThreadLocal中 */
       final var threadLocalList = threadList.get();
       if (threadLocalList.size() < 50) {
          threadLocalList.add(weakThreadLocals ? new WeakReference<>(bagEntry) : bagEntry);

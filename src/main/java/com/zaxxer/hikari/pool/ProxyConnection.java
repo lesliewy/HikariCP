@@ -235,6 +235,10 @@ public abstract class ProxyConnection implements Connection
    // **********************************************************************
 
    /** {@inheritDoc} */
+   /**
+    * 释放连接.
+    * @throws SQLException
+    */
    @Override
    public final void close() throws SQLException
    {

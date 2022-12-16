@@ -34,6 +34,12 @@ import static com.zaxxer.hikari.util.ClockSource.currentTime;
  *
  * @author Brett Wooldridge
  */
+
+/**
+ * 封装Connection对象;
+ * pool中存储的连接就是PoolEntry;
+ *
+ */
 final class PoolEntry implements IConcurrentBagEntry
 {
    private static final Logger LOGGER = LoggerFactory.getLogger(PoolEntry.class);
@@ -43,14 +49,18 @@ final class PoolEntry implements IConcurrentBagEntry
    long lastAccessed;
    long lastBorrowed;
 
+   /** 当前状态 */
    @SuppressWarnings("FieldCanBeLocal")
    private volatile int state = 0;
+   /** 是否该丢弃 */
    private volatile boolean evict;
 
    private volatile ScheduledFuture<?> endOfLife;
    private volatile ScheduledFuture<?> keepalive;
 
+   /** 打开的statement集合 */
    private final FastList<Statement> openStatements;
+   /** 关联的HikariPool对象 */
    private final HikariPool hikariPool;
 
    private final boolean isReadOnly;

@@ -37,12 +37,24 @@ import static com.zaxxer.hikari.pool.HikariPool.POOL_NORMAL;
  *
  * @author Brett Wooldridge
  */
+
+/**
+ * springboot 启动时会初始化HikariDataSource.
+ * getConnection() 是入口.
+ *
+ */
 public class HikariDataSource extends HikariConfig implements DataSource, Closeable
 {
    private static final Logger LOGGER = LoggerFactory.getLogger(HikariDataSource.class);
 
    private final AtomicBoolean isShutdown = new AtomicBoolean();
 
+   /**
+    * fastPathPool 会在初始化时创建
+    * pool 是在获取连接数创建
+    * volatile修饰pool导致每次读pool都要从主存加载，每次写也要写回主存，性能不如没volatile修饰的fastPathPool
+    * 所以推荐使用HikariDataSource有参构造函数进行初始化。
+    */
    private final HikariPool fastPathPool;
    private volatile HikariPool pool;
 
@@ -101,6 +113,7 @@ public class HikariDataSource extends HikariConfig implements DataSource, Closea
       }
 
       // See http://en.wikipedia.org/wiki/Double-checked_locking#Usage_in_Java
+      /** pool 单例. */
       HikariPool result = pool;
       if (result == null) {
          synchronized (this) {
@@ -109,6 +122,7 @@ public class HikariDataSource extends HikariConfig implements DataSource, Closea
                validate();
                LOGGER.info("{} - Starting...", getPoolName());
                try {
+                  /** 初始化创建HikariPool对象 */
                   pool = result = new HikariPool(this);
                   this.seal();
                }
@@ -125,6 +139,7 @@ public class HikariDataSource extends HikariConfig implements DataSource, Closea
          }
       }
 
+      /** 调用pool的getConnection()方法获取连接 */
       return result.getConnection();
    }
 
