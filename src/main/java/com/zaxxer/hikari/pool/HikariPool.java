@@ -57,6 +57,7 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
 {
    private final Logger logger = LoggerFactory.getLogger(HikariPool.class);
 
+   /** 连接池状态 */
    public static final int POOL_NORMAL = 0;
    public static final int POOL_SUSPENDED = 1;
    public static final int POOL_SHUTDOWN = 2;
@@ -78,6 +79,7 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
    /** 关闭连接线程池 */
    private final ThreadPoolExecutor closeConnectionExecutor;
 
+   /** 相当于底层连接池 */
    private final ConcurrentBag<PoolEntry> connectionBag;
 
    private final ProxyLeakTaskFactory leakTaskFactory;
@@ -99,7 +101,7 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
 
       /** 初始化ConcurrentBag对象 */
       this.connectionBag = new ConcurrentBag<>(this);
-      /** 创建SuspendResumeLock对象 */
+      /** 创建SuspendResumeLock对象, 信号量, FAUX_LOCK表示没有锁， 即使是allowSuspension的信号量， permits也设置了10000.  */
       this.suspendResumeLock = config.isAllowPoolSuspension() ? new SuspendResumeLock() : SuspendResumeLock.FAUX_LOCK;
 
       this.houseKeepingExecutorService = initializeHouseKeepingExecutorService();
@@ -163,7 +165,7 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
     */
    public Connection getConnection(final long hardTimeout) throws SQLException
    {
-      /** 获取锁 */
+      /** 获取信号量，基本等同于无锁，可以并发获取. */
       suspendResumeLock.acquire();
       final var startTime = currentTime();
 
@@ -334,6 +336,10 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
    // ***********************************************************************
 
    /** {@inheritDoc} */
+   /**
+    * 添加poolEntry到concurrentBag中.
+    * 调用一次concurrentBag就会添加满.
+    */
    @Override
    public void addBagItem(final int waiting)
    {
@@ -490,7 +496,7 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
             // variance up to 2.5% of the maxlifetime
             final var variance = maxLifetime > 10_000 ? ThreadLocalRandom.current().nextLong( maxLifetime / 40 ) : 0;
             final var lifetime = maxLifetime - variance;
-            /** 给PoolEntry添加定时任务,当PoolEntry对象达到最大生命周期时间后触发定时任务将连接标记为被抛弃 */
+            /** 给PoolEntry添加定时任务,当PoolEntry对象达到最大生命周期时间后触发定时任务将连接标记为被抛弃. schedule()只会执行一次. */
             poolEntry.setFutureEol(houseKeepingExecutorService.schedule(new MaxLifetimeTask(poolEntry), lifetime, MILLISECONDS));
          }
 
@@ -727,6 +733,9 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
    /**
     * Creating and adding poolEntries (connections) to the pool.
     */
+   /**
+    *
+    */
    private final class PoolEntryCreator implements Callable<Boolean>
    {
       /** 日志前缀 */
@@ -871,6 +880,9 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
       }
    }
 
+   /**
+    * 关闭连接的task. 一般用于达到maxLifetime后的关闭。
+    */
    private final class MaxLifetimeTask implements Runnable
    {
       private final PoolEntry poolEntry;

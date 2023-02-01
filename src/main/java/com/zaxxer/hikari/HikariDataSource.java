@@ -39,8 +39,15 @@ import static com.zaxxer.hikari.pool.HikariPool.POOL_NORMAL;
  */
 
 /**
+ * BasicPoolTest: 基本用法.
+ *
  * springboot 启动时会初始化HikariDataSource.
  * getConnection() 是入口.
+ *
+ * HikariDataSource: 方便使用者，依赖HikariPool.
+ * HikariPool: 主要逻辑在这里。连接池. recycle() addBagItem(), createPoolEntry(), closeConnection()
+ * ConcurrentBag: 底层的连接池.
+ * PoolEntry: 封装Connection.
  *
  */
 public class HikariDataSource extends HikariConfig implements DataSource, Closeable
@@ -50,8 +57,8 @@ public class HikariDataSource extends HikariConfig implements DataSource, Closea
    private final AtomicBoolean isShutdown = new AtomicBoolean();
 
    /**
-    * fastPathPool 会在初始化时创建
-    * pool 是在获取连接数创建
+    * 性能点：
+    * fastPathPool 在初始化时创建;  pool 是在获取连接数创建;
     * volatile修饰pool导致每次读pool都要从主存加载，每次写也要写回主存，性能不如没volatile修饰的fastPathPool
     * 所以推荐使用HikariDataSource有参构造函数进行初始化。
     */

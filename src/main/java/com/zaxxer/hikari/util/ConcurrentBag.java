@@ -68,6 +68,9 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
    /**
     * 可以理解为ConcurrentBag缓存的连接池, 存放着状态为未使用、使用中和保留中三种状态的PoolEntry对象.
     *  pool 创建连接时添加.
+    *  pool.getTotalConnections() 返回的就是sharedList.size().
+    *  pool.getIdleConnections() 返回的是sharedList中STATE_NOT_IN_USE 状态的连接的数量.
+    *  pool.getActiveConnections() 返回的是sharedList中STATE_IN_USE状态的连接的数量.
     */
    private final CopyOnWriteArrayList<T> sharedList;
    /** 是否使用弱引用 */
@@ -89,9 +92,12 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
 
    public interface IConcurrentBagEntry
    {
+      /** 可以被borrow */
       int STATE_NOT_IN_USE = 0;
+      /** 已经被borrow */
       int STATE_IN_USE = 1;
       int STATE_REMOVED = -1;
+      /** 不可以被borrow */
       int STATE_RESERVED = -2;
 
       boolean compareAndSet(int expectState, int newState);
@@ -149,7 +155,7 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
     */
    public T borrow(long timeout, final TimeUnit timeUnit) throws InterruptedException
    {
-      /** 1.从ThreadLocal中获取当前线程绑定的对象集合  */
+      /** 1.从ThreadLocal中获取当前线程绑定的对象集合. concurrentBag.requite()时添加进去的, 通常在ProxyConnection.close()时. */
       // Try the thread-local list first
       final var list = threadList.get();
       for (int i = list.size() - 1; i >= 0; i--) {
