@@ -97,7 +97,7 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
       /** 已经被borrow */
       int STATE_IN_USE = 1;
       int STATE_REMOVED = -1;
-      /** 不可以被borrow */
+      /** 不可以被borrow, KeepaliveTask 时用于校验连接有效性。 */
       int STATE_RESERVED = -2;
 
       boolean compareAndSet(int expectState, int newState);

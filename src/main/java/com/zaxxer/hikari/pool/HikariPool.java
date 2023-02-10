@@ -106,6 +106,7 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
 
       this.houseKeepingExecutorService = initializeHouseKeepingExecutorService();
 
+      /** fail fast, 加入连接都无法新建就直接跑出来. */
       checkFailFast();
 
       if (config.getMetricsTrackerFactory() != null) {
