@@ -106,7 +106,7 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
 
       this.houseKeepingExecutorService = initializeHouseKeepingExecutorService();
 
-      /** fail fast, 加入连接都无法新建就直接跑出来. */
+      /** fail fast, 假如连接都无法新建就直接跑出来. */
       checkFailFast();
 
       if (config.getMetricsTrackerFactory() != null) {
@@ -190,7 +190,7 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
                /** 通过Javassist创建代理连接: ProxyConnection */
                return poolEntry.createProxyConnection(leakTaskFactory.schedule(poolEntry));
             }
-         } while (timeout > 0L);
+         } while (timeout > 0L);   /** 只要没超时就一直borrow, 直到获得一个正常的连接. */
 
          metricsTracker.recordBorrowTimeoutStats(startTime);
          throw createTimeoutException(startTime);
